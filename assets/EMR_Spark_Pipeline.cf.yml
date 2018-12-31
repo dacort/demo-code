@@ -1,0 +1,566 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  RepositoryName:
+    Type: String
+    Default: sparkAppDemoForPipeline
+  productName:
+    Type: String
+    Default: SparkDemoProduct
+  portfolioName:
+    Type: String
+    Default: demoPortfolio
+  liveTestStackName:
+    Type: String
+    Default: sparkAppDemo
+Resources:
+  Repository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryDescription: repo for demo Spark App
+      RepositoryName: !Ref 'RepositoryName'
+  CodePipelineBucket:
+    Type: AWS::S3::Bucket
+  BuildAndUnitTest:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/java:openjdk-8
+        Type: LINUX_CONTAINER
+      Name: !Sub '${AWS::StackName}BT'
+      ServiceRole: !GetAtt 'CodePipelineServiceRole.Arn'
+      Source:
+        BuildSpec: "version: 0.2\n\nphases:\n  build:\n    commands:\n      - mvn\
+          \ package\nartifacts:\n  files:\n    - target/spark-demo-1.0.jar"
+        Type: CODEPIPELINE
+  liveTest:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/java:openjdk-8
+        Type: LINUX_CONTAINER
+      Name: !Sub '${AWS::StackName}LT'
+      ServiceRole: !GetAtt 'CodePipelineServiceRole.Arn'
+      Source:
+        BuildSpec: "version: 0.2\n\nphases:\n  build:\n    commands:\n      sed -i -r 's/Spec./SpecLive./' pom.xml  && mvn test"
+        Type: CODEPIPELINE        
+  firstcommitter:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/python:2.7.12
+        Type: LINUX_CONTAINER
+      Name: !Sub '${AWS::StackName}initCommit'
+      ServiceRole: !GetAtt 'CodePipelineServiceRole.Arn'
+      Source:
+        BuildSpec: !Join [" ",["version: 0.2\n\nphases:\n  build:\n    commands:\n      git config --global user.email 'you@example.com' && git config --global push.default simple && pip install boto3 && aws emr create-default-roles && python commitSample.py",!Ref 'GitUser', !Ref 'RepositoryName']]
+        Type: S3
+        Location: !Join ["/", [!Ref 'CodePipelineBucket' ,"sparkdemoapp.zip"]]
+  pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Type: S3
+        Location: !Ref 'CodePipelineBucket'
+      RoleArn: !GetAtt 'CodePipelineServiceRole.Arn'
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: SourceAction
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Version: '1'
+            Provider: CodeCommit
+          OutputArtifacts:
+          - Name: appsource
+          Configuration:
+            BranchName: master
+            RepositoryName: !Ref 'RepositoryName'
+          RunOrder: 1
+      - Name: Build
+        Actions:
+        - Name: BuildApp
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          InputArtifacts:
+          - Name: appsource
+          OutputArtifacts:
+          - Name: buildstagebinaries
+          Configuration:
+            ProjectName: !Ref 'BuildAndUnitTest'
+          RunOrder: 1
+      - Name: QADeploy
+        Actions:
+        - Name: deploy
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: '1'
+            Provider: CloudFormation
+          InputArtifacts:
+          - Name: appsource
+          - Name: buildstagebinaries
+          OutputArtifacts:
+          - Name: QADeployStack
+          Configuration:
+            StackName: !Ref liveTestStackName
+            ActionMode: CREATE_UPDATE
+            TemplatePath: appsource::sparkdemo.yaml
+            Capabilities: CAPABILITY_IAM
+            ParameterOverrides: "{\"BucketName\":{\"Fn::GetArtifactAtt\":[\"buildstagebinaries\"\
+              ,\"BucketName\"]}, \"EnvType\":\"test\",\r\n\"ObjectKey\":{\"Fn::GetArtifactAtt\":[\"buildstagebinaries\"\
+              ,\"ObjectKey\"]}}"
+            RoleArn: !GetAtt 'CloudFormationRole.Arn'
+          RunOrder: 1
+      - Name: LiveTest
+        Actions:
+        - Name: AutomatedLiveTest
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          InputArtifacts:
+          - Name: appsource
+          Configuration:
+            ProjectName: !Ref 'liveTest'
+          RunOrder: 1
+      - Name: LiveTestApproval
+        Actions:
+        - Name: LiveTestApproval
+          ActionTypeId:
+            Category: Approval
+            Owner: AWS
+            Version: '1'
+            Provider: Manual
+          RunOrder: 1          
+      - Name: QACleanup
+        Actions:
+        - Name: deleteStack
+          ActionTypeId:
+            Category: Invoke
+            Owner: AWS
+            Version: 1
+            Provider: Lambda
+          Configuration:
+            FunctionName: !Ref DeleteCFFunction
+          RunOrder: 1
+      - Name: deployProduct
+        Actions:
+        - Name: deployProduct
+          ActionTypeId:
+            Category: Invoke
+            Owner: AWS
+            Version: 1
+            Provider: Lambda
+          InputArtifacts:
+          - Name: appsource
+          - Name: buildstagebinaries            
+          Configuration:
+            FunctionName: !Ref deployProductFunction
+          RunOrder: 1          
+  deployProductFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CopyDeployProductLambda
+    Properties:
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+      Runtime: "python2.7"
+      Environment:
+        Variables:
+          serviceCatalogBucket: !Ref 'CodePipelineBucket'
+          repositoryName: !Ref 'RepositoryName'
+          productName: !Ref 'productName'
+          portfolioName: !Ref 'portfolioName'
+      Timeout: 300
+      Handler: "lambda_function.lambda_handler"
+      Code: 
+        S3Bucket: !Ref 'CodePipelineBucket'
+        S3Key: 'deployProductYaml.zip'
+  DeleteCFFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+      Runtime: "python2.7"
+      Environment:
+        Variables:
+          stackName: !Ref liveTestStackName
+      Timeout: 300
+      Handler: "index.lambda_handler"
+      Code: 
+        ZipFile: |
+          import boto3
+          import os
+          code_pipeline = boto3.client('codepipeline')
+          cf = boto3.client('cloudformation')
+          def put_job_success(job):
+              print('Putting job success')
+              code_pipeline.put_job_success_result(jobId=job)
+          def put_job_failure(job, message):
+              print('Putting job failure')
+              print(message)
+              code_pipeline.put_job_failure_result(jobId=job, failureDetails={'message': message, 'type': 'JobFailed'})
+          def lambda_handler(event, context):
+              try:
+                  response = cf.delete_stack(StackName=os.environ['stackName'])
+                  put_job_success(event['CodePipeline.job']['id'])
+              except Exception as e:
+                  # If any other exceptions which we didn't expect are raised
+                  # then fail the job and log the exception message.
+                  print('Function failed due to exception.') 
+                  print(e)
+                  put_job_failure(event['CodePipeline.job']['id'], 'Function exception: ' + str(e))
+              return "Success"
+  DeleteBucketFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+      Runtime: "python2.7"
+      Timeout: 300
+      Handler: "index.handler"
+      Code: 
+        ZipFile: |
+         import cfnresponse
+         import boto3
+         from botocore.client import Config
+         import zipfile
+         def handler(event, context):
+            client = boto3.client('s3')
+            destinationbucket = event['ResourceProperties']['bucketName']
+            if event['RequestType'] == 'Delete':
+               s3 = boto3.resource('s3')
+               bucket = s3.Bucket(destinationbucket)
+               for key in bucket.objects.all():
+                  client.delete_object(Bucket=destinationbucket,  Key=key.key)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, "CustomResourcePhysicalID")
+  DeleteBucket:
+    Type: Custom::DeleteBucket
+    DependsOn: CodePipelineBucket
+    Properties:
+      ServiceToken: !GetAtt DeleteBucketFunction.Arn
+      bucketName: !Ref 'CodePipelineBucket'
+  cleanServiceCatalog:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: "index.handler"
+      Code: 
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import os
+          service_catalog = boto3.client('servicecatalog')
+          def getProductId(productName, portfolioId):
+            nextmarker = None
+            productID = ""
+            while True:
+              if nextmarker:
+                  product_response = service_catalog.search_products_as_admin(nextmarker=nextmarker, PortfolioId = portfolioId)
+              else:
+                  product_response = service_catalog.search_products_as_admin(PortfolioId=portfolioId)
+              for product in product_response['ProductViewDetails']:
+                  if product['ProductViewSummary']['Name'] == productName:
+                    productID = product['ProductViewSummary']['ProductId']
+                    break
+              if ('NextPageToken' in product_response) and productID == "" :
+                  nextmarker = product_response['NextPageToken']
+              else:
+                  break
+            return productID
+          def getPortfolio(portfolioName):
+            nextmarker = None
+            portfolioId = ""
+            while True:
+              if nextmarker:
+                  portfolio_response = service_catalog.list_portfolios(nextmarker=nextmarker)
+              else:
+                  portfolio_response = service_catalog.list_portfolios()
+              for portfolio in portfolio_response['PortfolioDetails']:
+                  if portfolio['DisplayName'] == portfolioName:
+                    portfolioId = portfolio['Id']
+                    break
+              if ('NextPageToken' in portfolio_response) and portfolioId == "" :
+                  nextmarker = portfolio_response['NextPageToken']
+              else:
+                  break
+            return portfolioId
+          def handler(event, context):
+            try:              
+              if event['RequestType'] == 'Delete':
+                portfolioId =  getPortfolio(event['ResourceProperties']['portfolioName'])
+                productId = getProductId(event['ResourceProperties']['productName'], portfolioId)
+                if portfolioId != "" and productId != "":
+                  response = service_catalog.list_constraints_for_portfolio(ProductId=productId,PortfolioId=portfolioId)
+                  while len(response['ConstraintDetails']) > 0:
+                    for constraint in response['ConstraintDetails']:
+                      service_catalog.delete_constraint(Id=constraint['ConstraintId'])
+                    response = service_catalog.list_constraints_for_portfolio(ProductId=productId,PortfolioId=portfolioId)
+                  response = service_catalog.disassociate_product_from_portfolio(ProductId=productId,PortfolioId=portfolioId)
+                if productId != "":
+                  service_catalog.delete_product(Id=productId)
+                if portfolioId != "":
+                  response = service_catalog.list_principals_for_portfolio(PortfolioId=portfolioId)
+                  while len(response['Principals']) > 0:
+                    for Principal in response['Principals']:
+                      service_catalog.disassociate_principal_from_portfolio(PortfolioId=portfolioId,PrincipalARN=Principal['PrincipalARN'])
+                    response = service_catalog.list_principals_for_portfolio(PortfolioId=portfolioId)
+                  response = service_catalog.list_portfolio_access(PortfolioId=portfolioId)
+                  while len(response['AccountIds']) > 0:
+                    for account in response['AccountIds']: 
+                      service_catalog.delete_portfolio_share(PortfolioId=portfolioId,AccountId=account)
+                    response = service_catalog.list_portfolio_access(PortfolioId=portfolioId)
+                  service_catalog.delete_portfolio(Id=portfolioId)
+            except Exception as e:
+              cfnresponse.send(event, context, cfnresponse.FAILED, {}, "CustomResourcePhysicalID")
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, "CustomResourcePhysicalID")
+            return ''
+      Runtime: python2.7
+      Timeout: 300
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+  cleanServiceCatalogresource:
+    Type: Custom::cleanServiceCatalog
+    Properties:
+      productName: !Ref 'productName'
+      portfolioName: !Ref 'portfolioName'
+      ServiceToken: !GetAtt cleanServiceCatalog.Arn
+  triggerInitialCommitF:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+      Runtime: "python2.7"
+      Timeout: 300
+      Handler: "index.handler"
+      Code: 
+        ZipFile: |
+         import cfnresponse
+         import boto3
+         from botocore.client import Config
+         import zipfile
+         def handler(event, context):
+            client = boto3.client('codebuild')
+            jobname = event['ResourceProperties']['jobname']
+            if event['RequestType'] == 'Create':
+              client.start_build(projectName=jobname)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, "CustomResourcePhysicalID")                        
+  triggerInitialCommit:
+    Type: Custom::triggerInitialCommit
+    DependsOn: Repository
+    Properties:
+      ServiceToken: !GetAtt triggerInitialCommitF.Arn
+      jobname: !Ref firstcommitter
+  CopyLambdasFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt 'CodePipelineServiceRole.Arn'
+      Runtime: "python2.7"
+      Timeout: 300
+      Handler: "index.handler"
+      Code: 
+        ZipFile: |
+         import cfnresponse
+         import boto3
+         from botocore.client import Config
+         import zipfile
+         def handler(event, context):
+            client = boto3.client('s3')
+            destinationbucket = event['ResourceProperties']['destinationBucketName']
+            sourceBucket = event['ResourceProperties']['sourceBucketName']
+            objectKey = event['ResourceProperties']['objectKey']
+            if event['RequestType'] != 'Delete':
+               s3 = boto3.client('s3')
+               s3.copy({ 'Bucket': sourceBucket, 'Key': objectKey}, destinationbucket, objectKey)
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, "CustomResourcePhysicalID")                        
+  CopyDeployProductLambda:
+    Type: Custom::CopyDeployProductLambda
+    Properties:
+      ServiceToken: !GetAtt CopyLambdasFunction.Arn
+      destinationBucketName: !Ref 'CodePipelineBucket'
+      sourceBucketName: 'lfcarocomdemo'
+      objectKey: 'deployProductYaml.zip'
+  CopySparkDemoAppLambda:
+    Type: Custom::CopyDeployProductLambda
+    Properties:
+      ServiceToken: !GetAtt CopyLambdasFunction.Arn
+      destinationBucketName: !Ref 'CodePipelineBucket'
+      sourceBucketName: 'lfcarocomdemo'
+      objectKey: 'sparkdemoapp.zip'
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+            - ec2.amazonaws.com
+            - codepipeline.amazonaws.com
+            - codebuild.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Action:
+            - s3:*
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - s3:PutObject
+            Resource: !Sub 'arn:aws:s3:::${CodePipelineBucket}/*'
+            Effect: Allow
+          - Action:
+            - codecommit:CancelUploadArchive
+            - codecommit:GetBranch
+            - codecommit:GetCommit
+            - codecommit:GetUploadArchiveStatus
+            - codecommit:UploadArchive
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - iam:PassRole
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - lambda:InvokeFunction
+            - lambda:ListFunctions
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - cloudformation:CreateStack
+            - cloudformation:DeleteStack
+            - cloudformation:DescribeStacks
+            - cloudformation:UpdateStack
+            - cloudformation:CreateChangeSet
+            - cloudformation:DeleteChangeSet
+            - cloudformation:DescribeChangeSet
+            - cloudformation:ExecuteChangeSet
+            - cloudformation:SetStackPolicy
+            - cloudformation:ValidateTemplate
+            - elasticmapreduce:ListClusters
+            - elasticmapreduce:DescribeCluster
+            - elasticmapreduce:AddJobFlowSteps
+            - elasticmapreduce:ListSteps
+            - elasticmapreduce:DescribeStep
+            - codepipeline:PutJobFailureResult
+            - codepipeline:PutJobSuccessResult
+            - servicecatalog:*
+            - codecommit:BatchGetRepositories
+            - codecommit:Get*
+            - codecommit:List*
+            - codecommit:CreateBranch
+            - codecommit:Put*
+            - codecommit:Test*
+            - codecommit:Update*
+            - codecommit:GitPull
+            - codecommit:GitPush    
+            - iam:PassRole
+            - iam:CreateServiceSpecificCredential
+            - iam:ListServiceSpecificCredentials
+            - iam:UpdateServiceSpecificCredential
+            - iam:DeleteServiceSpecificCredential
+            - iam:ResetServiceSpecificCredential 
+            - iam:GetRole        
+            - iam:CreateRole
+            - iam:PutRolePolicy
+            - iam:CreateInstanceProfile
+            - iam:AddRoleToInstanceProfile
+            - iam:ListRoles
+            - iam:GetPolicy
+            - iam:GetInstanceProfile
+            - iam:GetPolicyVersion
+            - iam:AttachRolePolicy
+            - iam:PassRole                       
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+            Effect: Allow
+          - Action:
+            - codebuild:BatchGetBuilds
+            - codebuild:StartBuild
+            Resource: '*'
+            Effect: Allow
+  CloudFormationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - cloudformation.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Action:
+            - iam:CreateRole
+            - iam:CreatePolicy
+            - iam:GetRole
+            - iam:DeleteRole
+            - iam:PutRolePolicy
+            - iam:PassRole
+            - iam:DeleteRolePolicy
+            - cloudformation:*
+            - ec2:CreateVpc
+            - ec2:*
+            - elasticmapreduce:*
+            - lambda:*
+            - s3:*
+            Resource: '*'
+            Effect: Allow
+          - Action:
+            - s3:*
+            Resource: !Sub 'arn:aws:s3:::${CodePipelineBucket}*'
+            Effect: Allow
+  GitUser:
+    Type: "AWS::IAM::User"
+    Properties: 
+      Policies:
+      - PolicyName: codecommitPusher
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Action:
+            - codecommit:BatchGetRepositories
+            - codecommit:Get*
+            - codecommit:List*
+            - codecommit:CreateBranch
+            - codecommit:Put*
+            - codecommit:Test*
+            - codecommit:Update*
+            - codecommit:GitPull
+            - codecommit:GitPush
+            - iam:CreateServiceSpecificCredential
+            - iam:ListServiceSpecificCredentials
+            - iam:UpdateServiceSpecificCredential
+            - iam:DeleteServiceSpecificCredential
+            - iam:ResetServiceSpecificCredential
+            Resource: '*'
+            Effect: Allow
+Outputs:
+  PipelineName:
+    Value: !Ref 'pipeline'

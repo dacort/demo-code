@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Auto-scaling Presto Cluster
+
+Parameters:
+  ClusterName:
+    Type: "String"
+    Description: "Name your cluster"
+  
+  ClusterSize:
+    Type: "Number"
+    Description: "Size of cluster"
+    AllowedValues:
+      - "2"
+      - "5"
+      - "10"
+      - "20"
+      - "50"
+      - "100"
+    Default: "2"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      ClusterName:
+        default: "Cluster Name"
+      ClusterSize:
+        default: "Max number of auto-scaled Task nodes"
+    ParameterGroups:
+      -
+        Label:
+          default: "Cluster Configuration"
+        Parameters:
+          - ClusterName
+          - ClusterSize
+  
+Resources:
+  EMRCluster:
+    Type: AWS::EMR::Cluster
+    Properties:
+      Name: { Ref: ClusterName }
+      JobFlowRole: "EMR_EC2_DefaultRole"
+      ServiceRole: "EMR_DefaultRole"
+      AutoScalingRole: "EMR_AutoScaling_DefaultRole"
+      ReleaseLabel: "emr-5.19.0"
+      Instances: 
+        Ec2SubnetId: "subnet-XXXX"
+        Ec2KeyName: "sshkeyname"
+        MasterInstanceGroup: 
+          InstanceCount: 1
+          InstanceType: "r5.4xlarge"
+          Market: "ON_DEMAND"
+          Name: "Master"
+        CoreInstanceGroup: 
+          InstanceCount: 2
+          InstanceType: "r5.4xlarge"
+          Market: "ON_DEMAND"
+          Name: "Core"
+      Applications:
+        - Name: "Presto"
+        - Name: "Ganglia"
+        - Name: "Hue"
+      LogUri:
+        Fn::Join: ["", ["s3://aws-logs-", Ref: "AWS::AccountId", "-", Ref: "AWS::Region",  "/", "elasticmapreduce", "/"]]
+  
+  AutoScalingInstanceGroup: 
+    Type: AWS::EMR::InstanceGroupConfig
+    Properties: 
+      InstanceCount: 2
+      InstanceType: "r5.4xlarge"
+      InstanceRole: "TASK"
+      Market: "ON_DEMAND"
+      Name: "TaskAutoScale"
+      JobFlowId: 
+        Ref: "EMRCluster"
+      AutoScalingPolicy:
+        Constraints: 
+          MaxCapacity:
+            Ref: ClusterSize
+          MinCapacity: 2
+        Rules:
+          - Name: Scale-out
+            Description: Scale-out policy
+            Action:
+              SimpleScalingPolicyConfiguration:
+                AdjustmentType: CHANGE_IN_CAPACITY
+                ScalingAdjustment: 18
+                CoolDown: 300
+            Trigger:
+              CloudWatchAlarmDefinition:
+                Dimensions:
+                  - Key: JobFlowId
+                    Value: '${emr.clusterId}'
+                EvaluationPeriods: 1
+                Namespace: AWS/ElasticMapReduce
+                Period: 300
+                ComparisonOperator: GREATER_THAN_OR_EQUAL
+                Statistic: AVERAGE
+                Threshold: 1
+                Unit: COUNT
+                MetricName: ScaleOutToMax
+          - Name: Scale-in
+            Description: Scale-in policy
+            Action:
+              SimpleScalingPolicyConfiguration:
+                AdjustmentType: CHANGE_IN_CAPACITY
+                ScalingAdjustment: -18
+                CoolDown: 300
+            Trigger:
+              CloudWatchAlarmDefinition:
+                Dimensions:
+                  - Key: JobFlowId
+                    Value: '${emr.clusterId}'
+                EvaluationPeriods: 1
+                Namespace: AWS/ElasticMapReduce
+                Period: 300
+                ComparisonOperator: GREATER_THAN_OR_EQUAL
+                Statistic: AVERAGE
+                Threshold: 1
+                Unit: COUNT
+                MetricName: ScaleInToMin
+
+Outputs:
+  "PrestoUI":
+    Description: "Presto Admin Console"
+    Value:
+      Fn::Sub: "http://${EMRCluster.MasterPublicDNS}:8889"
+  "HueUI":
+    Description: "Hue Interface"
+    Value:
+      Fn::Sub: "http://${EMRCluster.MasterPublicDNS}:8888"
+

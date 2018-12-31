@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: On-Demand EMR Cluster
+
+Parameters:
+  ClusterName:
+    Type: "String"
+    Description: "Name your cluster"
+
+  JobType:
+    Type: "String"
+    Description: "Select your job type"
+    AllowedValues:
+      - "Spark"
+      - "Hive"
+      - "Interactive"
+    Default: "Spark"
+  
+  ComputeRequirements:
+    Type: "String"
+    Description: "Compute requirements"
+    AllowedValues:
+      - "Generic"
+      - "CPU"
+      - "Memory"
+    Default: "Generic"
+
+  JobArtifacts:
+    Type: "String"
+    Description: "Spark script or Hive SQL"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      ClusterName:
+        default: "Cluster Name"
+      JobType:
+        default: "Job Type"
+      ComputeRequirements:
+        default: "Compute or Memory"
+      JobArtifacts:
+        default: "Job Parameters"
+    ParameterGroups:
+      - 
+        Label:
+          default: "Job Configuration"
+        Parameters:
+          - JobType
+          - JobArtifacts
+      -
+        Label:
+          default: "Cluster Configuration"
+        Parameters:
+          - ClusterName
+          - ComputeRequirements
+
+Mappings:
+  ComputeMapping:
+    Generic:
+      "instancetype": "m5.4xlarge"
+    CPU:
+      "instancetype": "c5.4xlarge"
+    Memory:
+      "instancetype": "r5.4xlarge"
+  StepMapping:
+    Spark:
+      "stepcommand": "spark-submit --deploy-mode cluster"
+    Hive:
+      "stepcommand": "hive-script --run-hive-script --args -f"
+  
+Resources:
+  EMRCluster:
+    Type: AWS::EMR::Cluster
+    Properties:
+      Name: { Ref: ClusterName }
+      JobFlowRole: "EMR_EC2_DefaultRole"
+      ServiceRole: "EMR_DefaultRole"
+      ReleaseLabel: "emr-5.19.0"
+      Instances: 
+        Ec2SubnetId: "subnet-XXXX"
+        Ec2KeyName: "sshkeyname"
+        MasterInstanceGroup: 
+          InstanceCount: 1
+          InstanceType:
+            Fn::FindInMap:
+              - ComputeMapping
+              - Ref: "ComputeRequirements"
+              - "instancetype"
+          Market: "ON_DEMAND"
+          Name: "Master"
+        CoreInstanceGroup: 
+          InstanceCount: 2
+          InstanceType:
+            Fn::FindInMap:
+              - ComputeMapping
+              - Ref: "ComputeRequirements"
+              - "instancetype"
+          Market: "ON_DEMAND"
+          Name: "Core"
+      Applications:
+        - Name: "Spark"
+        - Name: "Ganglia"
+        - Name: "Hive"
+      LogUri:
+        Fn::Join: ["", ["s3://aws-logs-", Ref: "AWS::AccountId", "-", Ref: "AWS::Region",  "/", "elasticmapreduce", "/"]]
+  
+  EMRLogProcessor:
+    Type: AWS::EMR::Step
+    Properties:
+      ActionOnFailure: "CONTINUE"
+      HadoopJarStep:
+        Jar: "command-runner.jar"
+        Args: !Split
+        - " "
+        - Fn::Join:
+          - " "
+          - 
+            - Fn::FindInMap: [StepMapping, {Ref: JobType}, "stepcommand"]
+            - {Ref: JobArtifacts}
+      JobFlowId:
+        Ref: EMRCluster
+      Name: "Log Converter"
+
+Outputs:
+  "MasterNodeHadoopURL":
+    Description: "EMR Resource Manager"
+    Value:
+      Fn::Sub: "http://${EMRCluster.MasterPublicDNS}:8088"
