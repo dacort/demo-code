@@ -5,6 +5,39 @@ Preparation notes from my 2018 AWS re:Invent EMR Demo ([slides](https://slidesha
 - [Demo 1](https://youtu.be/ISl9sTzxoSo?t=2284): AWS Service Catalog for easy provisioning
 - [Demo 2](https://www.youtube.com/watch?v=ISl9sTzxoSo&feature=youtu.be&t=3238): EMR Notebook creation and usage
 
+## Requirements
+
+- AWS CLI installed and configured
+- macOS utilites: make, tempfile, sed, find
+  - Only tested on macOS Sierra (10.12.6)
+
+## Usage
+
+1. Gather some information you need for the demo:
+   1. Subnet ID to launch the cluster in
+   2. IAM user, group, or role to grant access to
+   3. SSH key name for the EMR clusters
+   4. Bucket name used above
+
+2. Run `create_sc_entries.sh`, this will perform several steps:
+   1. Upload required assets to the S3 bucket you specify
+   2. Create Service Catalog Portfolio and 2 sample Products
+   3. Create several revisions of the "Data Analyst" product
+   4. Grant Service Catalog access to the specified role
+
+    Feel free to change other settings in [create_sc_entries.sh](create_sc_entries.sh) like the portfolio `display-name` or `provider-name`.
+
+    ```shell
+    TARGET_SUBNET=subnet-abcd \
+    TARGET_GRANTEE=role/roleName \
+    CLUSTER_SSH_KEY=keyname \
+    BUCKET_NAME=bucket_name \
+    sh create_sc_entries.sh
+    ```
+
+3. See [Demo_Links.md](Demo_Links.md) for example Job Parameters you can provide to the Spark and Hive Job Types in the Data Analyst EMR.
+
+
 ## Pre-Talk Checklist
 
 ### Demo 1
