@@ -8,8 +8,8 @@ Preparation notes from my 2018 AWS re:Invent EMR Demo ([slides](https://slidesha
 ## Requirements
 
 - AWS CLI installed and configured
-- macOS utilites: make, tempfile, sed, find
-  - Only tested on macOS Sierra (10.12.6)
+- System utilites: make, tempfile, sed, find
+  - Tested on macOS Sierra (10.12.6) and Amazon Linux 2
 
 ## Usage
 

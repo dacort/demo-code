@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Ensure dependencies are installed
+if ! [ -x "$(command -v jq)" ]; then
+  echo 'Error: jq is not installed.' >&2
+  exit 1
+fi
+
 # Define some environment variables 
 : ${TARGET_SUBNET:=subnet-XXXX}
 : ${TARGET_GRANTEE:=role/Admin}
@@ -11,11 +17,21 @@
 # Used to retrieve output from AWS CLI commands
 TMP_FILE=$(mktemp)
 
+# macOS uses BSD sed, Linux uses GNU sed
+if [[ "$OSTYPE" == "linux-gnu" ]]; then
+    SED_CMD="sed -i"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    SED_CMD="sed -i ''"
+else
+    echo "Unsupported operating system, only Linux and macOS are supported."
+    exit 1
+fi
+
 # Update settings specific to our desired region in the CloudFormation templates
 find assets/cloudformation -type f -exec \
-    sed -i '' "s/Ec2SubnetId:.*/Ec2SubnetId: \"${TARGET_SUBNET}\"/" {} +
+    ${SED_CMD} "s/Ec2SubnetId:.*/Ec2SubnetId: \"${TARGET_SUBNET}\"/" {} +
 find assets/cloudformation -type f -exec \
-    sed -i '' "s/Ec2KeyName:.*/Ec2KeyName: \"${CLUSTER_SSH_KEY}\"/" {} +
+    ${SED_CMD} "s/Ec2KeyName:.*/Ec2KeyName: \"${CLUSTER_SSH_KEY}\"/" {} +
 
 # Deploy the updated templates
 RELEASE_BUCKET=${BUCKET_NAME} AWS_PROFILE=${AWS_PROFILE} make
