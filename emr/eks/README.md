@@ -181,3 +181,29 @@ You should see the top wind speed per day in your Spark driver `stdout.gz` file 
 
 - Want to run it on EMR 6.2.0? Change `--release-label` to `emr-6.2.0-latest`
 - Want to run the windy city script for San Francisco? Add `"entryPointArguments": ["-123.18,37.64,-122.28,37.93"]` to the `sparkSubmitJobDriver` JSON
+
+## Cleanup
+
+1. Make sure you don't have any managed endpoints for EMR Studio
+
+```shell
+# List existing managed endpoints for your virtual cluster
+aws emr-containers list-managed-endpoints \
+    --virtual-cluster-id ${EMR_EKS_CLUSTER_ID} \
+    --output text \
+    --query 'endpoints[*].[id,state,name]'
+
+# Delete them if you do
+for endpoint_id in $(aws emr-containers list-managed-endpoints --virtual-cluster-id ${EMR_EKS_CLUSTER_ID} --output text --query 'endpoints[*].[id]'); do
+    echo "Deleting ${endpoint_id}"
+    aws emr-containers delete-managed-endpoint \
+        --id ${endpoint_id} \
+        --virtual-cluster-id ${EMR_EKS_CLUSTER_ID} 
+done
+```
+
+2. Delete the virtual cluster
+
+```shell
+aws emr-containers delete-virtual-cluster --id ${EMR_EKS_CLUSTER_ID}
+```
