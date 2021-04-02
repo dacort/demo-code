@@ -130,7 +130,7 @@ class EMRContainersStack(cdk.Stack):
             "EMR_EKS_Job_Role",
             assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess"),  # Yes, yes...I know. :)
                 iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEC2FullAccess"),
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "AWSGlueConsoleFullAccess"
