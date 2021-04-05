@@ -3,7 +3,7 @@
 ## Getting the database connection string
 
 ```shell
-RDS_SECRETS=$(aws secretsmanager get-secret-value --secret-id 'arn:aws:secretsmanager:us-east-1:568026268536:secret:RDSStackSecret343E4640-xZjsKMCh7J15-w3eMpD' | jq -r '.SecretString' )
+RDS_SECRETS=$(aws secretsmanager get-secret-value --secret-id 'arn:aws:secretsmanager:us-east-1:123456789012:secret:RDSStackSecret12345' | jq -r '.SecretString' )
 RDS_USERNAME=$(echo $RDS_SECRETS | jq -r '.username')
 RDS_PASSWORD=$(echo $RDS_SECRETS | jq -r '.password')
 RDS_DATABASE=$(echo $RDS_SECRETS | jq -r '.dbname')
