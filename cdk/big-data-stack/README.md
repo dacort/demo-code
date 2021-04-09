@@ -9,7 +9,9 @@ It installs the following:
 - EMR Cluster
 - EKS Cluster
     - With k8s Cluster Autoscaler
+    - With Apache Airflow 2.0
 - EMR Virtual Cluster (for EKS)
+    - With Airflow 2.0 plugin
 
 You can use the following step to activate your virtualenv.
 
@@ -63,7 +65,9 @@ The cluster is creating using the new EMR roles and is configured to use Spark a
 
 Creates an EKS cluster with a single managed Node Group of `m5.xlarge` instances. In addition, it installs the Cluster Autoscaler, Kubernetes Dashboard, and Apache Airflow from the [community-provided Helm Chart](https://github.com/airflow-helm/charts/tree/main/charts/airflow).
 
-An IAM service role is also created specifically for EMR.
+An IAM service role is created specifically for EMR.
+
+Another role is created for Airflow that has permissions to execute jobs against the `emr-containers` API.
 
 ### EMRContainers
 
