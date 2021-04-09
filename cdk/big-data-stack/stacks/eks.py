@@ -46,6 +46,7 @@ class EKSStack(cdk.Stack):
         )
 
         self.add_admin_role_to_cluster()
+        self.add_cluster_admin()
         self.enable_dashboard()
         self.enable_airflow()
 
@@ -68,34 +69,25 @@ class EKSStack(cdk.Stack):
         )
         self.cluster.aws_auth.add_masters_role(admin_role)
 
-    def enable_dashboard(self, namespace: str = "kube-system"):
-        self.cluster.add_helm_chart(
-            "kubernetes-dashboard",
-            namespace=namespace,
-            chart="kubernetes-dashboard",
-            repository="https://kubernetes.github.io/dashboard/",
-            values={
-                "fullnameOverride": "kubernetes-dashboard",  # This must be set to acccess the UI via `kubectl proxy`
-                "extraArgs": ["--token-ttl=0"],
-            },
-        )
-        self.cluster.add_manifest(
+    def add_cluster_admin(self, name="eks-admin"):
+        # Add admin privileges so we can sign in to the dashboard as the service account
+        sa = self.cluster.add_manifest(
             "eks-admin-sa",
             {
                 "apiVersion": "v1",
                 "kind": "ServiceAccount",
                 "metadata": {
-                    "name": "eks-admin",
-                    "namespace": namespace,
+                    "name": name,
+                    "namespace": "kube-system",
                 },
             },
         )
-        self.cluster.add_manifest(
+        binding = self.cluster.add_manifest(
             "eks-admin-rbac",
             {
                 "apiVersion": "rbac.authorization.k8s.io/v1beta1",
                 "kind": "ClusterRoleBinding",
-                "metadata": {"name": "eks-admin"},
+                "metadata": {"name": name},
                 "roleRef": {
                     "apiGroup": "rbac.authorization.k8s.io",
                     "kind": "ClusterRole",
@@ -104,10 +96,22 @@ class EKSStack(cdk.Stack):
                 "subjects": [
                     {
                         "kind": "ServiceAccount",
-                        "name": "eks-admin",
-                        "namespace": namespace,
+                        "name": name,
+                        "namespace": "kube-system",
                     }
                 ],
+            },
+        )
+
+    def enable_dashboard(self, namespace: str = "kubernetes-dashboard"):
+        chart = self.cluster.add_helm_chart(
+            "kubernetes-dashboard",
+            namespace=namespace,
+            chart="kubernetes-dashboard",
+            repository="https://kubernetes.github.io/dashboard/",
+            values={
+                "fullnameOverride": "kubernetes-dashboard",  # This must be set to acccess the UI via `kubectl proxy`
+                "extraArgs": ["--token-ttl=0"],
             },
         )
 
@@ -120,7 +124,28 @@ class EKSStack(cdk.Stack):
             emrsvcrole, groups=[], username="emr-containers"
         )
 
+    def add_emr_containers_for_airflow(self) -> eks.ServiceAccount:
+        sa = self.cluster.add_service_account(
+            "AirflowServiceAccount", namespace="airflow"
+        )
+
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "emr-containers:StartJobRun",
+                    "emr-containers:ListJobRuns",
+                    "emr-containers:DescribeJobRun",
+                    "emr-containers:CancelJobRun",
+                ],
+                resources=["*"],
+            )
+        )
+
+        return sa
+
     def enable_airflow(self, namespace: str = "airflow"):
+        # This is specific to emr-containers and Airflow so we can run EMR on EKS jobs
+        service_role = self.add_emr_containers_for_airflow()
         volume = self.cluster.add_manifest("multiaz-volume", self.gp2_multiazvolume())
         chart = self.cluster.add_helm_chart(
             "airflow",
@@ -145,7 +170,11 @@ class EKSStack(cdk.Stack):
                                     "key": "value",
                                 }
                             },
-                        }
+                        },
+                        {
+                            "name": "AWS_DEFAULT_REGION",
+                            "value": cdk.Aws.REGION,
+                        },
                     ],
                 },
                 "web": {"resources": {"limits": {"cpu": "1", "memory": "1Gi"}}},
@@ -161,6 +190,13 @@ class EKSStack(cdk.Stack):
                     }
                 },
                 "postgresql": {"persistence": {"storageClass": "multiazvolume"}},
+                "serviceAccount": {
+                    "create": False,
+                    "name": service_role.service_account_name,
+                    "annotations": {
+                        "eks.amazonaws.com/role-arn": service_role.role.role_arn
+                    },
+                },
             },
         )
         chart.node.add_dependency(volume)
