@@ -43,18 +43,17 @@ class EKSStack(cdk.Stack):
             min_size=1,
             max_size=20,
             disk_size=50,
-            # tags={
-            #     f'k8s.io/cluster-autoscaler/{cluster_name}': "owned",
-            #     'k8s.io/cluster-autoscaler/enabled': 'TRUE'
-            # }
         )
 
         self.add_admin_role_to_cluster()
-        # self.enable_autoscaling(ng)
+        self.add_cluster_admin()
         self.enable_dashboard()
+        self.enable_airflow()
 
         # Cluster AutoScaling FTW
-        ClusterAutoscaler(self.cluster_name, self, self.cluster, ng).enable_autoscaling()
+        ClusterAutoscaler(
+            self.cluster_name, self, self.cluster, ng
+        ).enable_autoscaling()
 
         # This is emr-specific, but we have to do it here to prevent circular dependencies
         self.map_iam_to_eks()
@@ -70,180 +69,50 @@ class EKSStack(cdk.Stack):
         )
         self.cluster.aws_auth.add_masters_role(admin_role)
 
-    def enable_autoscaling(self, node_group: eks.Nodegroup) -> None:
-        # First we need to create a policy to handle the autoscaling
-        policy = self.autoscaling_policy()
-        # policy.attach_to_role(node_group.role)
-        role = self.autoscaler_role(policy)
-
-        # Then we need to map the IAM role to a service account
-        sa = self.cluster.add_service_account(
-            "cluster-autoscaler", name="cluster-autoscaler", namespace="kube-system"
-        )
-        sa.add_to_principal_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "autoscaling:DescribeAutoScalingGroups",
-                    "autoscaling:DescribeAutoScalingInstances",
-                    "autoscaling:DescribeLaunchConfigurations",
-                    "autoscaling:DescribeTags",
-                    "autoscaling:SetDesiredCapacity",
-                    "autoscaling:TerminateInstanceInAutoScalingGroup",
-                ],
-                resources=["*"],
-            )
-        )
-
-        cdk.Tag.add(
-            node_group,
-            f"k8s.io/cluster-autoscaler/{self.cluster_name}",
-            "owned",
-            apply_to_launched_instances=True,
-        )
-        cdk.Tag.add(
-            node_group,
-            "k8s.io/cluster-autoscaler/enabled",
-            "true",
-            apply_to_launched_instances=True,
-        )
-        deployment = {
-            "apiVersion": "apps/v1",
-            "kind": "Deployment",
-            "metadata": {
-                "name": "cluster-autoscaler",
-                "namespace": "kube-system",
-                "labels": {"app": "cluster-autoscaler"},
-            },
-            "spec": {
-                "replicas": 1,
-                "selector": {"matchLabels": {"app": "cluster-autoscaler"}},
-                "template": {
-                    "metadata": {"labels": {"app": "cluster-autoscaler"}},
-                    "spec": {
-                        "serviceAccountName": "cluster-autoscaler",
-                        "containers": [
-                            {
-                                "image": "us.gcr.io/k8s-artifacts-prod/autoscaling/cluster-autoscaler:v1.19.1",
-                                "name": "cluster-autoscaler",
-                                "resources": {
-                                    "limits": {"cpu": "100m", "memory": "300Mi"},
-                                    "requests": {"cpu": "100m", "memory": "300Mi"},
-                                },
-                                "command": [
-                                    "./cluster-autoscaler",
-                                    "--v=4",
-                                    "--stderrthreshold=info",
-                                    "--cloud-provider=aws",
-                                    "--balance-similar-node-groups=true",
-                                    "--skip-nodes-with-local-storage=false",
-                                    "--skip-nodes-with-system-pods=false",
-                                    "--ignore-daemonsets-utilization=true",
-                                    "--expander=random",
-                                    "--node-group-auto-discovery=asg:tag=k8s.io/cluster-autoscaler/enabled,k8s.io/cluster-autoscaler/data-team",
-                                ],
-                                "env": [{"name": "AWS_REGION", "value": "us-east-1"}],
-                                "volumeMounts": [
-                                    {
-                                        "name": "ssl-certs",
-                                        "mountPath": "/etc/ssl/certs/ca-certificates.crt",
-                                        "readOnly": True,
-                                    }
-                                ],
-                                "imagePullPolicy": "Always",
-                            }
-                        ],
-                        "volumes": [
-                            {
-                                "name": "ssl-certs",
-                                "hostPath": {"path": "/etc/ssl/certs/ca-bundle.crt"},
-                            }
-                        ],
-                        "affinity": {
-                            "nodeAffinity": {
-                                "requiredDuringSchedulingIgnoredDuringExecution": {
-                                    "nodeSelectorTerms": [
-                                        {
-                                            "matchExpressions": [
-                                                {
-                                                    "key": "node.kubernetes.io/instance-type",
-                                                    "operator": "In",
-                                                    "values": [
-                                                        "m5.xlarge",
-                                                    ],
-                                                }
-                                            ]
-                                        }
-                                    ]
-                                }
-                            }
-                        },
-                    },
+    def add_cluster_admin(self, name="eks-admin"):
+        # Add admin privileges so we can sign in to the dashboard as the service account
+        sa = self.cluster.add_manifest(
+            "eks-admin-sa",
+            {
+                "apiVersion": "v1",
+                "kind": "ServiceAccount",
+                "metadata": {
+                    "name": name,
+                    "namespace": "kube-system",
                 },
             },
-        }
-        self.cluster.add_manifest('cluster-autoscaler', deployment)
-        # self.cluster.add_helm_chart(
-        #     "cluster-autoscaler",
-        #     chart="cluster-autoscaler",
-        #     repository="https://kubernetes.github.io/autoscaler",
-        #     values={
-        #         "autoDiscovery.clusterName": self.cluster_name,
-        #         'rbac.serviceAccount.annotations."eks.amazonaws.com/role-arn"': role.role_arn,
-        #     },
-        #     namespace="kube-system",
-        # )
-
-    def autoscaling_policy(self) -> iam.Policy:
-        policy_statement = iam.PolicyStatement(
-            actions=[
-                "autoscaling:DescribeAutoScalingGroups",
-                "autoscaling:DescribeAutoScalingInstances",
-                "autoscaling:DescribeLaunchConfigurations",
-                "autoscaling:DescribeTags",
-                "autoscaling:SetDesiredCapacity",
-                "autoscaling:TerminateInstanceInAutoScalingGroup",
-            ],
-            resources=["*"],
         )
-        return iam.Policy(
-            self,
-            "cluster-autoscaler-policy",
-            statements=[policy_statement],
-            policy_name="cluster-autoscaler-policy",
-        )
-
-    def autoscaler_role(self, policy: iam.Policy) -> iam.Role:
-        oidc_arn = cdk.CfnJson(
-            self,
-            "oidc-provider",
-            value=self.cluster.open_id_connect_provider.open_id_connect_provider_arn,
-        )
-
-        oidc_arn_condition = cdk.CfnJson(
-            self,
-            "oidc-provider-condition",
-            value={
-                f"{self.cluster.open_id_connect_provider.open_id_connect_provider_issuer}:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+        binding = self.cluster.add_manifest(
+            "eks-admin-rbac",
+            {
+                "apiVersion": "rbac.authorization.k8s.io/v1beta1",
+                "kind": "ClusterRoleBinding",
+                "metadata": {"name": name},
+                "roleRef": {
+                    "apiGroup": "rbac.authorization.k8s.io",
+                    "kind": "ClusterRole",
+                    "name": "cluster-admin",
+                },
+                "subjects": [
+                    {
+                        "kind": "ServiceAccount",
+                        "name": name,
+                        "namespace": "kube-system",
+                    }
+                ],
             },
         )
-        role = iam.Role(
-            self,
-            "ClusterAutoscalerRole",
-            assumed_by=iam.FederatedPrincipal(
-                oidc_arn.value.to_string(),
-                {"StringEquals": oidc_arn_condition},
-                "sts:AssumeRoleWithWebIdentity",
-            ),
-        )
-        role.attach_inline_policy(policy)
-        return role
 
-    def enable_dashboard(self):
-        self.cluster.add_helm_chart(
+    def enable_dashboard(self, namespace: str = "kubernetes-dashboard"):
+        chart = self.cluster.add_helm_chart(
             "kubernetes-dashboard",
-            namespace='kube-system',
+            namespace=namespace,
             chart="kubernetes-dashboard",
             repository="https://kubernetes.github.io/dashboard/",
+            values={
+                "fullnameOverride": "kubernetes-dashboard",  # This must be set to acccess the UI via `kubectl proxy`
+                "extraArgs": ["--token-ttl=0"],
+            },
         )
 
     def map_iam_to_eks(self):
@@ -255,8 +124,100 @@ class EKSStack(cdk.Stack):
             emrsvcrole, groups=[], username="emr-containers"
         )
 
+    def add_emr_containers_for_airflow(self) -> eks.ServiceAccount:
+        sa = self.cluster.add_service_account(
+            "AirflowServiceAccount", namespace="airflow"
+        )
+
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "emr-containers:StartJobRun",
+                    "emr-containers:ListJobRuns",
+                    "emr-containers:DescribeJobRun",
+                    "emr-containers:CancelJobRun",
+                ],
+                resources=["*"],
+            )
+        )
+
+        return sa
+
+    def enable_airflow(self, namespace: str = "airflow"):
+        # This is specific to emr-containers and Airflow so we can run EMR on EKS jobs
+        service_role = self.add_emr_containers_for_airflow()
+        volume = self.cluster.add_manifest("multiaz-volume", self.gp2_multiazvolume())
+        chart = self.cluster.add_helm_chart(
+            "airflow",
+            namespace=namespace,
+            chart="airflow",
+            repository="https://airflow-helm.github.io/charts",
+            version="8.0.5",
+            values={
+                "airflow": {
+                    "executor": "KubernetesExecutor",
+                    "image": {
+                        "repository": "ghcr.io/dacort/airflow-emr-eks",
+                        "tag": "latest",
+                        "pullPolicy": "Always",
+                    },
+                    "extraEnv": [
+                        {
+                            "name": "AIRFLOW__CORE__FERNET_KEY",
+                            "valueFrom": {
+                                "secretKeyRef": {
+                                    "name": "airflow-fernet-key",
+                                    "key": "value",
+                                }
+                            },
+                        },
+                        {
+                            "name": "AWS_DEFAULT_REGION",
+                            "value": cdk.Aws.REGION,
+                        },
+                    ],
+                },
+                "web": {"resources": {"limits": {"cpu": "1", "memory": "1Gi"}}},
+                "workers": {"enabled": False},
+                "flower": {"enabled": False},
+                "redis": {"enabled": False},
+                "dags": {
+                    "gitSync": {
+                        "enabled": True,
+                        "repo": "https://github.com/dacort/airflow-example-dags.git",
+                        "branch": "main",
+                        "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}},
+                    }
+                },
+                "postgresql": {"persistence": {"storageClass": "multiazvolume"}},
+                "serviceAccount": {
+                    "create": False,
+                    "name": service_role.service_account_name,
+                    "annotations": {
+                        "eks.amazonaws.com/role-arn": service_role.role.role_arn
+                    },
+                },
+            },
+        )
+        chart.node.add_dependency(volume)
+
+        # Display the command necessarty to port-forward the Airflow Web UI
+        airflow_forward_cmd = f'kubectl port-forward --namespace {namespace} $(kubectl get pods --namespace {namespace} -l "component=web,app=airflow" -o jsonpath="{{.items[0].metadata.name}}") 8080:8080'
+        cdk.CfnOutput(self, "AirflowLoginCommand", value=airflow_forward_cmd)
+
+    def gp2_multiazvolume(self):
+        return {
+            "kind": "StorageClass",
+            "apiVersion": "storage.k8s.io/v1",
+            "metadata": {"name": "multiazvolume"},
+            "provisioner": "kubernetes.io/aws-ebs",
+            "parameters": {"type": "gp2", "iopsPerGB": "10", "fsType": "ext4"},
+            "volumeBindingMode": "WaitForFirstConsumer",
+        }
+
+
 # Helpful references
 # https://betterprogramming.pub/how-to-organize-your-aws-cdk-project-f1c463aa966e
 # https://github.com/aftouh/cdk-template
-# 
+#
 # https://faun.pub/spawning-an-autoscaling-eks-cluster-52977aa8b467

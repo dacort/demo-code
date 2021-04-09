@@ -44,8 +44,8 @@ class EMRContainersStack(cdk.Stack):
 
         # Finally we create our cluster!
         self.virtual_cluster = self.create_virtual_cluster(namespace)
-        self.virtual_cluster.node.add_dependency(ns) 
-        self.virtual_cluster.node.add_dependency(bind) 
+        self.virtual_cluster.node.add_dependency(ns)
+        self.virtual_cluster.node.add_dependency(bind)
 
     def create_namespace(self, name: str) -> eks.KubernetesManifest:
         return self.eks_cluster.add_manifest(
@@ -130,7 +130,9 @@ class EMRContainersStack(cdk.Stack):
             "EMR_EKS_Job_Role",
             assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess"),  # Yes, yes...I know. :)
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "AmazonS3FullAccess"
+                ),  # Yes, yes...I know. :)
                 iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEC2FullAccess"),
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "AWSGlueConsoleFullAccess"
@@ -180,16 +182,21 @@ class EMRContainersStack(cdk.Stack):
                 ],
             )
         )
-    
+
     def create_virtual_cluster(self, namespace: str) -> None:
-        return emrc.CfnVirtualCluster(scope=self,
+        return emrc.CfnVirtualCluster(
+            scope=self,
             id="EMRCluster",
-            container_provider=emrc.CfnVirtualCluster.ContainerProviderProperty(id=self.eks_cluster.cluster_name,
-                info=emrc.CfnVirtualCluster.ContainerInfoProperty(eks_info=emrc.CfnVirtualCluster.EksInfoProperty(namespace=namespace)),
-                type="EKS"
+            container_provider=emrc.CfnVirtualCluster.ContainerProviderProperty(
+                id=self.eks_cluster.cluster_name,
+                info=emrc.CfnVirtualCluster.ContainerInfoProperty(
+                    eks_info=emrc.CfnVirtualCluster.EksInfoProperty(namespace=namespace)
+                ),
+                type="EKS",
             ),
-            name="EMRCluster"
+            name="EMRCluster",
         )
+
 
 # Helpful references
 # https://github.com/aws-samples/aws-cdk-for-emr-on-eks
