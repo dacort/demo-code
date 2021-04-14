@@ -26,6 +26,7 @@ setuptools.setup(
         "aws_cdk.aws-emr",
         "aws_cdk.aws-eks",
         "aws_cdk.aws-emrcontainers",
+        "aws_cdk.aws-servicecatalog",
     ],
 
     python_requires=">=3.6",
