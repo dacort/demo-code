@@ -3,6 +3,7 @@ from aws_cdk import (
     aws_eks as eks,
     aws_ec2 as ec2,
     aws_iam as iam,
+    aws_logs as logs,
 )
 
 from plugins.eks.autoscaler import ClusterAutoscaler
@@ -144,8 +145,18 @@ class EKSStack(cdk.Stack):
         return sa
 
     def enable_airflow(self, namespace: str = "airflow"):
+
+        # We want a log group specifically for Airflow
+        log_group = logs.LogGroup(
+            self, "AirflowLogGroup", retention=logs.RetentionDays.ONE_WEEK
+        )
+
         # This is specific to emr-containers and Airflow so we can run EMR on EKS jobs
         service_role = self.add_emr_containers_for_airflow()
+        log_group.grant_write(service_role)
+        log_group.grant(service_role, "logs:CreateLogGroup")
+        log_group.grant(service_role, "logs:GetLogEvents")
+
         volume = self.cluster.add_manifest("multiaz-volume", self.gp2_multiazvolume())
         chart = self.cluster.add_helm_chart(
             "airflow",
@@ -155,6 +166,10 @@ class EKSStack(cdk.Stack):
             version="8.0.5",
             values={
                 "airflow": {
+                    "config": {
+                        "AIRFLOW__LOGGING__REMOTE_LOGGING": "True",
+                        "AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER": f"cloudwatch://{log_group.log_group_arn}",
+                    },
                     "executor": "KubernetesExecutor",
                     "image": {
                         "repository": "ghcr.io/dacort/airflow-emr-eks",
