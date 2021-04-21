@@ -389,6 +389,15 @@ class EMRContainersStack(cdk.Stack):
             }
         )
 
+        # We still have to run a manual command
+        # aws emr-containers create-managed-endpoint \
+        # --type JUPYTER_ENTERPRISE_GATEWAY \
+        # --virtual-cluster-id ${EMR_EKS_CLUSTER_ID} \
+        # --name dacort-jeg \
+        # --execution-role-arn ${EMR_EKS_EXECUTION_ARN} \
+        # --release-label emr-6.2.0-latest \
+        # --certificate-arn ${JEG_CERT_ARN}
+
 
 
 # Helpful references

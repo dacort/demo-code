@@ -4,7 +4,6 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_s3 as s3,
-    aws_secretsmanager as secrets,
     aws_servicecatalog as servicecatalog,
 )
 
@@ -28,6 +27,9 @@ class EMRStudio(cdk.Stack):
         # - An s3 bucket for notebook assets
         # - Service role and user role
         engine_sg = ec2.SecurityGroup(self, "EMRStudioEngine", vpc=vpc)
+
+        # The workspace security group requires explicit egress access to the engine security group.
+        # For that reason, we disable the default allow all.
         workspace_sg = ec2.SecurityGroup(self, "EMRWorkspaceEngine", vpc=vpc, allow_all_outbound=False)
         engine_sg.add_ingress_rule(
             workspace_sg,
@@ -43,7 +45,9 @@ class EMRStudio(cdk.Stack):
             ec2.Port.tcp(443), "Required for outbound git access"
         )
 
+        # This is here Studio assests live like ipynb notebooks and git repos
         studio_bucket = s3.Bucket(self, "EMRStudioAssets")
+        
         service_role = iam.Role(
             self,
             "EMRStudioServiceRole",
