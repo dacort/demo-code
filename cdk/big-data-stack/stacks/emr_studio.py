@@ -30,7 +30,9 @@ class EMRStudio(cdk.Stack):
 
         # The workspace security group requires explicit egress access to the engine security group.
         # For that reason, we disable the default allow all.
-        workspace_sg = ec2.SecurityGroup(self, "EMRWorkspaceEngine", vpc=vpc, allow_all_outbound=False)
+        workspace_sg = ec2.SecurityGroup(
+            self, "EMRWorkspaceEngine", vpc=vpc, allow_all_outbound=False
+        )
         engine_sg.add_ingress_rule(
             workspace_sg,
             ec2.Port.tcp(18888),
@@ -47,7 +49,7 @@ class EMRStudio(cdk.Stack):
 
         # This is here Studio assests live like ipynb notebooks and git repos
         studio_bucket = s3.Bucket(self, "EMRStudioAssets")
-        
+
         service_role = iam.Role(
             self,
             "EMRStudioServiceRole",
@@ -55,25 +57,11 @@ class EMRStudio(cdk.Stack):
             managed_policies=[
                 iam.ManagedPolicy(
                     self,
-                    "StudioServicePolicy01",
+                    "EMRStudioServiceRolePolicy",
                     statements=[
                         iam.PolicyStatement(
+                            sid="AllowEMRReadOnlyActions",
                             actions=[
-                                "ec2:AuthorizeSecurityGroupEgress",
-                                "ec2:AuthorizeSecurityGroupIngress",
-                                "ec2:CreateSecurityGroup",
-                                "ec2:DescribeSecurityGroups",
-                                "ec2:RevokeSecurityGroupEgress",
-                                "ec2:CreateNetworkInterface",
-                                "ec2:CreateNetworkInterfacePermission",
-                                "ec2:DeleteNetworkInterface",
-                                "ec2:DeleteNetworkInterfacePermission",
-                                "ec2:DescribeNetworkInterfaces",
-                                "ec2:ModifyNetworkInterfaceAttribute",
-                                "ec2:DescribeTags",
-                                "ec2:DescribeInstances",
-                                "ec2:DescribeSubnets",
-                                "ec2:DescribeVpcs",
                                 "elasticmapreduce:ListInstances",
                                 "elasticmapreduce:DescribeCluster",
                                 "elasticmapreduce:ListSteps",
@@ -81,18 +69,183 @@ class EMRStudio(cdk.Stack):
                             resources=["*"],
                         ),
                         iam.PolicyStatement(
-                            actions=["ec2:CreateTags"],
-                            resources=["arn:aws:ec2:*:*:network-interface/*"],
+                            sid="AllowEC2ENIActionsWithEMRTags",
+                            actions=[
+                                "ec2:CreateNetworkInterfacePermission",
+                                "ec2:DeleteNetworkInterface",
+                            ],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="network-interface/*",
+                                )
+                            ],
                             conditions={
-                                "ForAllValues:StringEquals": {
-                                    "aws:TagKeys": [
-                                        "aws:elasticmapreduce:editor-id",
-                                        "aws:elasticmapreduce:job-flow-id",
-                                    ]
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
                                 }
                             },
                         ),
                         iam.PolicyStatement(
+                            sid="AllowEC2ENIAttributeAction",
+                            actions=["ec2:ModifyNetworkInterfaceAttribute"],
+                            resources=[
+                                [
+                                    cdk.Stack.format_arn(
+                                        self, service="ec2", resource_name=f"{name}/*"
+                                    )
+                                    for name in [
+                                        "instance",
+                                        "network-interface",
+                                        "security-group",
+                                    ]
+                                ]
+                            ],
+                        ),
+                        iam.PolicyStatement(
+                            sid='AllowEC2SecurityGroupActionsWithEMRTags',
+                            actions=[
+                                "ec2:AuthorizeSecurityGroupEgress",
+                                "ec2:AuthorizeSecurityGroupIngress",
+                                "ec2:RevokeSecurityGroupEgress",
+                                "ec2:RevokeSecurityGroupIngress",
+                                "ec2:DeleteNetworkInterfacePermission",
+                            ],
+                            resources=['*'],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowDefaultEC2SecurityGroupsCreationWithEMRTags",
+                            actions=["ec2:CreateSecurityGroup"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="security-group/*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowDefaultEC2SecurityGroupsCreationInVPCWithEMRTags",
+                            actions=["ec2:CreateSecurityGroup"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="vpc/*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowAddingEMRTagsDuringDefaultSecurityGroupCreation",
+                            actions=["ec2:CreateTags"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="security-group/*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true",
+                                    "ec2:CreateAction": "CreateSecurityGroup"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowEC2ENICreationWithEMRTags",
+                            actions=["ec2:CreateNetworkInterface"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="network-interface/*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowEC2ENICreationInSubnetAndSecurityGroupWithEMRTags",
+                            actions=["ec2:CreateNetworkInterface"],
+                            resources=[
+                                [cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name=f"{name}/*",
+                                ) for name in ['subnet', 'security-group']]
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowAddingTagsDuringEC2ENICreation",
+                            actions=["ec2:CreateTags"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource_name="network-interface/*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "ec2:CreateAction": "CreateNetworkInterface"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowEC2ReadOnlyActions",
+                            actions=[
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeNetworkInterfaces",
+                                "ec2:DescribeTags",
+                                "ec2:DescribeInstances",
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeVpcs",
+                            ],
+                            resources=['*'],
+                        ),
+                        iam.PolicyStatement(
+                            sid="AllowSecretsManagerReadOnlyActionsWithEMRTags",
+                            actions=["secretsmanager:GetSecretValue"],
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="secretsmanager",
+                                    resource_name="secret:*",
+                                )
+                            ],
+                            conditions={
+                                "StringEquals": {
+                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                }
+                            },
+                        ),
+                        iam.PolicyStatement(
+                            sid="S3permission",
                             actions=[
                                 "s3:PutObject",
                                 "s3:GetObject",
@@ -101,10 +254,6 @@ class EMRStudio(cdk.Stack):
                                 "s3:DeleteObject",
                             ],
                             resources=["arn:aws:s3:::*"],
-                        ),
-                        iam.PolicyStatement(
-                            actions=["secretsmanager:GetSecretValue"],
-                            resources=["arn:aws:secretsmanager:*:*:secret:*"],
                         ),
                     ],
                 )
@@ -115,6 +264,8 @@ class EMRStudio(cdk.Stack):
             "EMRStudioUserRole",
             assumed_by=iam.ServicePrincipal("elasticmapreduce.amazonaws.com"),
         )
+
+        # TODO: PAUSED HERE UPDATING TEMPLATE
         basic_user_policy = iam.ManagedPolicy(
             self,
             "studio_basic_user_policy",
