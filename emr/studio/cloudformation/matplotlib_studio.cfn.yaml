@@ -771,6 +771,8 @@ Resources:
       Tags:
         - Key: Name
           Value: PrivateSubnet2
+        - Key: for-use-with-amazon-emr-managed-policies
+          Value: true
       VpcId: {Ref: VPC}
       MapPublicIpOnLaunch: 'false'
       AvailabilityZone:
