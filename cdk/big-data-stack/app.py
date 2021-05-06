@@ -28,6 +28,8 @@ emr = EMRStack(
 
 # The EKS stack requires bootstrapping
 # Run "cdk bootstrap aws://account/region"
+# You can also optionally specify an IAM role name to be mapped to a cluster admin
+# `-c eks_admin_role_name=AdminRole`
 eks = EKSStack(app, "EKSStack", vpc.vpc)
 
 # Now add a virtual EMR cluster!
