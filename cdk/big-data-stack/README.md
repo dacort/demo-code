@@ -9,9 +9,12 @@ It installs the following:
 - EMR Cluster
 - EKS Cluster
     - With k8s Cluster Autoscaler
+    - With Kubernetes Dashboard
     - With Apache Airflow 2.0
 - EMR Virtual Cluster (for EKS)
     - With Airflow 2.0 plugin
+- EMR Studio
+    - Service Catalog template
 
 You can use the following step to activate your virtualenv.
 

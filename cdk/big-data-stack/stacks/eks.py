@@ -155,6 +155,9 @@ class EKSStack(cdk.Stack):
             version="8.0.5",
             values={
                 "airflow": {
+                    "config": {
+                        "AIRFLOW__LOGGING__REMOTE_LOGGING": "False",
+                    },
                     "executor": "KubernetesExecutor",
                     "image": {
                         "repository": "ghcr.io/dacort/airflow-emr-eks",

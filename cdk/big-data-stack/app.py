@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+from stacks.emr_studio import EMRStudio
 from stacks.emr_containers import EMRContainersStack
 
 from aws_cdk import core as cdk
@@ -27,10 +28,16 @@ emr = EMRStack(
 
 # The EKS stack requires bootstrapping
 # Run "cdk bootstrap aws://account/region"
+# You can also optionally specify an IAM role name to be mapped to a cluster admin
+# `-c eks_admin_role_name=AdminRole`
 eks = EKSStack(app, "EKSStack", vpc.vpc)
 
 # Now add a virtual EMR cluster!
 emr_containers = EMRContainersStack(app, "EMRContainers", vpc.vpc, eks.cluster)
+
+
+# We want to add EMR Studio to the mix as well :)
+emr_studio = EMRStudio(app, "EMRStudio", vpc.vpc, "big-data-studio")
 
 
 app.synth()

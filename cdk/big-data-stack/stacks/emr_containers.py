@@ -47,6 +47,9 @@ class EMRContainersStack(cdk.Stack):
         self.virtual_cluster.node.add_dependency(ns)
         self.virtual_cluster.node.add_dependency(bind)
 
+        # Let's try to create a managed endpoint
+        self.create_managed_endpoint()
+
     def create_namespace(self, name: str) -> eks.KubernetesManifest:
         return self.eks_cluster.add_manifest(
             name,
@@ -196,6 +199,205 @@ class EMRContainersStack(cdk.Stack):
             ),
             name="EMRCluster",
         )
+
+    def create_managed_endpoint(self) -> None:
+        sa = self.eks_cluster.add_service_account(
+            "studio-aws-load-balancer-controller",
+            name="studio-aws-load-balancer-controller",
+            namespace="kube-system",
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "iam:CreateServiceLinkedRole",
+                    "ec2:DescribeAccountAttributes",
+                    "ec2:DescribeAddresses",
+                    "ec2:DescribeInternetGateways",
+                    "ec2:DescribeVpcs",
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeNetworkInterfaces",
+                    "ec2:DescribeTags",
+                    "elasticloadbalancing:DescribeLoadBalancers",
+                    "elasticloadbalancing:DescribeLoadBalancerAttributes",
+                    "elasticloadbalancing:DescribeListeners",
+                    "elasticloadbalancing:DescribeListenerCertificates",
+                    "elasticloadbalancing:DescribeSSLPolicies",
+                    "elasticloadbalancing:DescribeRules",
+                    "elasticloadbalancing:DescribeTargetGroups",
+                    "elasticloadbalancing:DescribeTargetGroupAttributes",
+                    "elasticloadbalancing:DescribeTargetHealth",
+                    "elasticloadbalancing:DescribeTags",
+                ],
+                resources=["*"],
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "cognito-idp:DescribeUserPoolClient",
+                    "acm:ListCertificates",
+                    "acm:DescribeCertificate",
+                    "iam:ListServerCertificates",
+                    "iam:GetServerCertificate",
+                    "waf-regional:GetWebACL",
+                    "waf-regional:GetWebACLForResource",
+                    "waf-regional:AssociateWebACL",
+                    "waf-regional:DisassociateWebACL",
+                    "wafv2:GetWebACL",
+                    "wafv2:GetWebACLForResource",
+                    "wafv2:AssociateWebACL",
+                    "wafv2:DisassociateWebACL",
+                    "shield:GetSubscriptionState",
+                    "shield:DescribeProtection",
+                    "shield:CreateProtection",
+                    "shield:DeleteProtection",
+                ],
+                resources=["*"],
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "ec2:RevokeSecurityGroupIngress",
+                    "ec2:CreateSecurityGroup",
+                ],
+                resources=["*"],
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["ec2:CreateTags"],
+                resources=["arn:aws:ec2:*:*:security-group/*"],
+                conditions={
+                    "StringEquals": {"ec2:CreateAction": "CreateSecurityGroup"},
+                    "Null": {"aws:RequestTag/elbv2.k8s.aws/cluster": "false"},
+                },
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=["ec2:CreateTags", "ec2:DeleteTags"],
+                resources=["arn:aws:ec2:*:*:security-group/*"],
+                conditions={
+                    "Null": {
+                        "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false",
+                    }
+                },
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "ec2:RevokeSecurityGroupIngress",
+                    "ec2:DeleteSecurityGroup",
+                ],
+                resources=["*"],
+                conditions={"Null": {"aws:ResourceTag/elbv2.k8s.aws/cluster": "false"}},
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:CreateLoadBalancer",
+                    "elasticloadbalancing:CreateTargetGroup",
+                ],
+                resources=["*"],
+                conditions={"Null": {"aws:RequestTag/elbv2.k8s.aws/cluster": "false"}},
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:CreateListener",
+                    "elasticloadbalancing:DeleteListener",
+                    "elasticloadbalancing:CreateRule",
+                    "elasticloadbalancing:DeleteRule",
+                ],
+                resources=["*"],
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:AddTags",
+                    "elasticloadbalancing:RemoveTags",
+                ],
+                resources=[
+                    "arn:aws:elasticloadbalancing:*:*:targetgroup/*/*",
+                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*",
+                    "arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*",
+                ],
+                conditions={
+                    "Null": {
+                        "aws:RequestTag/elbv2.k8s.aws/cluster": "true",
+                        "aws:ResourceTag/elbv2.k8s.aws/cluster": "false",
+                    }
+                },
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:ModifyLoadBalancerAttributes",
+                    "elasticloadbalancing:SetIpAddressType",
+                    "elasticloadbalancing:SetSecurityGroups",
+                    "elasticloadbalancing:SetSubnets",
+                    "elasticloadbalancing:DeleteLoadBalancer",
+                    "elasticloadbalancing:ModifyTargetGroup",
+                    "elasticloadbalancing:ModifyTargetGroupAttributes",
+                    "elasticloadbalancing:DeleteTargetGroup",
+                ],
+                resources=["*"],
+                conditions={"Null": {"aws:ResourceTag/elbv2.k8s.aws/cluster": "false"}},
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:RegisterTargets",
+                    "elasticloadbalancing:DeregisterTargets",
+                ],
+                resources=["arn:aws:elasticloadbalancing:*:*:targetgroup/*/*"],
+            )
+        )
+        sa.add_to_principal_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:SetWebAcl",
+                    "elasticloadbalancing:ModifyListener",
+                    "elasticloadbalancing:AddListenerCertificates",
+                    "elasticloadbalancing:RemoveListenerCertificates",
+                    "elasticloadbalancing:ModifyRule",
+                ],
+                resources=["*"],
+            )
+        )
+
+        chart = self.eks_cluster.add_helm_chart(
+            "alb",
+            namespace="kube-system",
+            chart="aws-load-balancer-controller",
+            repository="https://aws.github.io/eks-charts",
+            values={
+                "clusterName": self.eks_cluster.cluster_name,
+                "serviceAccount": {"create": False, "name": "studio-aws-load-balancer-controller"}
+            }
+        )
+
+        # We still have to run a manual command
+        # aws emr-containers create-managed-endpoint \
+        # --type JUPYTER_ENTERPRISE_GATEWAY \
+        # --virtual-cluster-id ${EMR_EKS_CLUSTER_ID} \
+        # --name dacort-jeg \
+        # --execution-role-arn ${EMR_EKS_EXECUTION_ARN} \
+        # --release-label emr-6.2.0-latest \
+        # --certificate-arn ${JEG_CERT_ARN}
+
 
 
 # Helpful references
