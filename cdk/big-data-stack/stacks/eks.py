@@ -47,13 +47,18 @@ class EKSStack(cdk.Stack):
 
         self.add_admin_role_to_cluster()
         self.add_cluster_admin()
-        self.enable_dashboard()
-        self.enable_airflow()
 
         # Cluster AutoScaling FTW
         ClusterAutoscaler(
             self.cluster_name, self, self.cluster, ng
         ).enable_autoscaling()
+
+        # We like to use the Kubernetes Dashboard
+        self.enable_dashboard()
+
+        # Install Airflow as well
+        # TODO: Make this optional
+        # self.enable_airflow()
 
         # This is emr-specific, but we have to do it here to prevent circular dependencies
         self.map_iam_to_eks()
@@ -144,8 +149,16 @@ class EKSStack(cdk.Stack):
         return sa
 
     def enable_airflow(self, namespace: str = "airflow"):
+        # While `add_helm_chart` will create the namespace for us if it doesn't exist,
+        # we have to create it here because we need to create a service role for emr-containers.
+        ns = self.cluster.add_manifest(
+            "airflow-namespace",
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}},
+        )
         # This is specific to emr-containers and Airflow so we can run EMR on EKS jobs
         service_role = self.add_emr_containers_for_airflow()
+        service_role.node.add_dependency(ns)
+
         volume = self.cluster.add_manifest("multiaz-volume", self.gp2_multiazvolume())
         chart = self.cluster.add_helm_chart(
             "airflow",
@@ -202,6 +215,7 @@ class EKSStack(cdk.Stack):
                 },
             },
         )
+        chart.node.add_dependency(ns)
         chart.node.add_dependency(volume)
 
         # Display the command necessarty to port-forward the Airflow Web UI
