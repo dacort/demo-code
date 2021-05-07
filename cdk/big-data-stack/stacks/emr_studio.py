@@ -11,7 +11,6 @@ from aws_cdk import (
 class EMRStudio(cdk.Stack):
     studio: emr.CfnStudio
 
-
     def __init__(
         self,
         scope: cdk.Construct,
@@ -33,16 +32,19 @@ class EMRStudio(cdk.Stack):
         In addition, we create a Service Catalog item for cluster templates.
         """
         super().__init__(scope, construct_id, **kwargs)
+        # Create security groups specifically for EMR Studio
         [engine_sg, workspace_sg] = self.create_security_groups(vpc)
+
+        # We also need to appropriately tag the VPC and subnets
+        self.tag_vpc_and_subnets(vpc)
 
         # This is where Studio assests live like ipynb notebooks and git repos
         studio_bucket = s3.Bucket(self, "EMRStudioAssets")
 
         # The service role provides a way for Amazon EMR Studio to interoperate with other AWS services.
-        # The IAM user role that will be assumed by users and groups logged in to an Amazon EMR Studio. 
+        # The IAM user role that will be assumed by users and groups logged in to an Amazon EMR Studio.
         service_role = self.create_service_role()
         user_role = self.create_user_role()
-
 
         basic_user_policy = iam.ManagedPolicy(
             self,
@@ -59,7 +61,7 @@ class EMRStudio(cdk.Stack):
             roles=[user_role],
             document=iam.PolicyDocument(
                 statements=self.intermediate_user_policy(service_role.role_arn)
-            )
+            ),
         )
 
         advanced_user_policy = iam.ManagedPolicy(
@@ -87,13 +89,17 @@ class EMRStudio(cdk.Stack):
 
         admin_user = self.node.try_get_context("studio_admin_user_name")
         if admin_user is not None:
-            self.create_studio_admin(studio.attr_studio_id, admin_user, advanced_user_policy.managed_policy_arn)
+            self.create_studio_admin(
+                studio.attr_studio_id,
+                admin_user,
+                advanced_user_policy.managed_policy_arn,
+            )
 
         cdk.CfnOutput(self, "EMRStudioURL", value=studio.attr_url)
 
         self.create_service_catalog_template(user_role.role_arn)
-    
-    def create_security_groups(self, vpc : ec2.Vpc):
+
+    def create_security_groups(self, vpc: ec2.Vpc):
         engine_sg = ec2.SecurityGroup(self, "EMRStudioEngine", vpc=vpc)
 
         # The workspace security group requires explicit egress access to the engine security group.
@@ -115,7 +121,18 @@ class EMRStudio(cdk.Stack):
             ec2.Port.tcp(443), "Required for outbound git access"
         )
 
+        # We need to tag the security groups so EMR can make modifications
+        cdk.Tags.of(engine_sg).add("for-use-with-amazon-emr-managed-policies", "true")
+        cdk.Tags.of(workspace_sg).add(
+            "for-use-with-amazon-emr-managed-policies", "true"
+        )
+
         return [engine_sg, workspace_sg]
+
+    def tag_vpc_and_subnets(self, vpc: ec2.IVpc):
+        cdk.Tags.of(vpc).add("for-use-with-amazon-emr-managed-policies", "true")
+        for subnet in vpc.public_subnets + vpc.private_subnets:
+            cdk.Tags.of(subnet).add("for-use-with-amazon-emr-managed-policies", "true")
 
     def create_service_role(self) -> iam.Role:
         return iam.Role(
@@ -159,21 +176,19 @@ class EMRStudio(cdk.Stack):
                         iam.PolicyStatement(
                             sid="AllowEC2ENIAttributeAction",
                             actions=["ec2:ModifyNetworkInterfaceAttribute"],
-                            resources=
-                                [
-                                    cdk.Stack.format_arn(
-                                        self,
-                                        service="ec2",
-                                        resource=name,
-                                        resource_name="*",
-                                    )
-                                    for name in [
-                                        "instance",
-                                        "network-interface",
-                                        "security-group",
-                                    ]
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource=name,
+                                    resource_name="*",
+                                )
+                                for name in [
+                                    "instance",
+                                    "network-interface",
+                                    "security-group",
                                 ]
-                            ,
+                            ],
                         ),
                         iam.PolicyStatement(
                             sid="AllowEC2SecurityGroupActionsWithEMRTags",
@@ -204,7 +219,7 @@ class EMRStudio(cdk.Stack):
                             ],
                             conditions={
                                 "StringEquals": {
-                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                    "aws:RequestTag/for-use-with-amazon-emr-managed-policies": "true"
                                 }
                             },
                         ),
@@ -238,7 +253,7 @@ class EMRStudio(cdk.Stack):
                             ],
                             conditions={
                                 "StringEquals": {
-                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true",
+                                    "aws:RequestTag/for-use-with-amazon-emr-managed-policies": "true",
                                     "ec2:CreateAction": "CreateSecurityGroup",
                                 }
                             },
@@ -256,24 +271,22 @@ class EMRStudio(cdk.Stack):
                             ],
                             conditions={
                                 "StringEquals": {
-                                    "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
+                                    "aws:RequestTag/for-use-with-amazon-emr-managed-policies": "true"
                                 }
                             },
                         ),
                         iam.PolicyStatement(
                             sid="AllowEC2ENICreationInSubnetAndSecurityGroupWithEMRTags",
                             actions=["ec2:CreateNetworkInterface"],
-                            resources=
-                                [
-                                    cdk.Stack.format_arn(
-                                        self,
-                                        service="ec2",
-                                        resource=name,
-                                        resource_name="*",
-                                    )
-                                    for name in ["subnet", "security-group"]
-                                ]
-                            ,
+                            resources=[
+                                cdk.Stack.format_arn(
+                                    self,
+                                    service="ec2",
+                                    resource=name,
+                                    resource_name="*",
+                                )
+                                for name in ["subnet", "security-group"]
+                            ],
                             conditions={
                                 "StringEquals": {
                                     "aws:ResourceTag/for-use-with-amazon-emr-managed-policies": "true"
@@ -349,8 +362,8 @@ class EMRStudio(cdk.Stack):
             "EMRStudioUserRole",
             assumed_by=iam.ServicePrincipal("elasticmapreduce.amazonaws.com"),
         )
-    
-    def create_studio_admin(self, studio_id:str, admin_username : str, policy_arn:str):
+
+    def create_studio_admin(self, studio_id: str, admin_username: str, policy_arn: str):
         emr.CfnStudioSessionMapping(
             self,
             "admin_studio_mapping",
@@ -498,8 +511,8 @@ class EMRStudio(cdk.Stack):
                 actions=["elasticmapreduce:RunJobFlow"],
             ),
         ]
-    
-    def create_service_catalog_template(self, user_role_arn : str):
+
+    def create_service_catalog_template(self, user_role_arn: str):
         ## Now it's time for service catalog stuff
         sc_role = iam.Role(
             self,
