@@ -45,12 +45,21 @@ class EKSStack(cdk.Stack):
             disk_size=50,
         )
 
+        # Add a Spot node group as well for additional capacity
+        spot_ng = self.cluster.add_nodegroup_capacity(
+            "spot-node-group",
+            capacity_type=eks.CapacityType.SPOT,
+            instance_types=[ec2.InstanceType(it) for it in ['c4.2xlarge', 'c5.2xlarge', 'c5d.2xlarge', 'c5a.2xlarge', 'c5n.2xlarge']],
+            min_size=1,
+            max_size=20,
+        )
+
         self.add_admin_role_to_cluster()
         self.add_cluster_admin()
 
         # Cluster AutoScaling FTW
         ClusterAutoscaler(
-            self.cluster_name, self, self.cluster, ng
+            self.cluster_name, self, self.cluster, [ng, spot_ng]
         ).enable_autoscaling()
 
         # We like to use the Kubernetes Dashboard

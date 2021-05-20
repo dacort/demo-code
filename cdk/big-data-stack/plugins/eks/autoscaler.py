@@ -12,12 +12,12 @@ class ClusterAutoscaler:
         cluster_name: str,
         eks: cdk.Stack,
         cluster: eks.Cluster,
-        node_group: eks.Nodegroup,
+        node_groups: list[eks.Nodegroup],
     ) -> None:
         self.eks_cluster_name = cluster_name
         self.eks_stack = eks
         self.eks_cluster = cluster
-        self.node_group = node_group
+        self.node_groups = node_groups
 
     def enable_autoscaling(self):
         """
@@ -28,20 +28,24 @@ class ClusterAutoscaler:
         - Creates a new cluster-autoscaler deployment
         - Creates the corresponding rbac rules
         """
-        self.tag_nodegroup()
+        self.tag_nodegroups()
         self.create_service_account()
         self.add_manifest()
 
-    def tag_nodegroup(self) -> None:
+    def tag_nodegroups(self) -> None:
+        for ng in self.node_groups:
+            self.tag_nodegroup(ng)
+
+    def tag_nodegroup(self, node_group: eks.Nodegroup) -> None:
         """
         This tags the EKS Node Groups with the tags required for the Cluster Autoscaler to mangae them.
         """
-        cdk.Tags.of(self.node_group).add(
+        cdk.Tags.of(node_group).add(
             f"k8s.io/cluster-autoscaler/{self.eks_cluster_name}",
             "owned",
             apply_to_launched_instances=True,
         )
-        cdk.Tags.of(self.node_group).add(
+        cdk.Tags.of(node_group).add(
             "k8s.io/cluster-autoscaler/enabled",
             "true",
             apply_to_launched_instances=True,
