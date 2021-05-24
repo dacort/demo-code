@@ -17,7 +17,7 @@ def topDays(spark, longLeft, latBottom, longRight, latTop):
     
     # Exclude missing values and filter on our bounding box
     seadf = df \
-        .filter(df.WND != '999,9,9,9999,9') \
+        .filter(F.split(df.WND, ",")[3] != '9999') \
         .filter(df.LATITUDE >= latBottom) \
         .filter(df.LATITUDE <= latTop) \
         .filter(df.LONGITUDE >= longLeft) \
