@@ -1,7 +1,6 @@
-
 # CDK Big Data Stack
 
-This is Big Data Stack built with Python CDK.
+This is a Big Data Stack built with Python CDK. *Python3.9 is required.*
 
 It installs the following:
 - VPC
