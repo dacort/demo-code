@@ -47,6 +47,9 @@ class EMRContainersStack(cdk.Stack):
         self.virtual_cluster.node.add_dependency(ns)
         self.virtual_cluster.node.add_dependency(bind)
 
+        # Register an output so we know our virtual cluster ID
+        cdk.CfnOutput(self, "EMRVirtualClusterID", value=self.virtual_cluster.attr_id)
+
         # Let's try to create a managed endpoint
         self.create_managed_endpoint()
 
@@ -186,7 +189,7 @@ class EMRContainersStack(cdk.Stack):
             )
         )
 
-    def create_virtual_cluster(self, namespace: str) -> None:
+    def create_virtual_cluster(self, namespace: str) -> emrc.CfnVirtualCluster:
         return emrc.CfnVirtualCluster(
             scope=self,
             id="EMRCluster",
@@ -199,6 +202,7 @@ class EMRContainersStack(cdk.Stack):
             ),
             name="EMRCluster",
         )
+
 
     def create_managed_endpoint(self) -> None:
         sa = self.eks_cluster.add_service_account(
