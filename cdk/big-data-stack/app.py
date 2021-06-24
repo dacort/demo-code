@@ -15,16 +15,19 @@ from stacks.emr_containers import EMRContainersStack
 app = cdk.App()
 
 vpc = VPCStack(app, "VPCStack")
-rds = RDSStack(app, "RDSStack", vpc.vpc)
-emr = EMRStack(
-    app,
-    "EMRStack",
-    vpc.vpc,
-    name="EMR with Hive Metastore",
-    release_label="emr-5.32.0",
-    rds_secret=rds.instance.secret,
-    rds_connections=rds.instance.connections,
-)
+
+# These two stacks are disabled by default
+# I use them when to demo EMR with a MySQL-backed Hive metastore
+# rds = RDSStack(app, "RDSStack", vpc.vpc)
+# emr = EMRStack(
+#     app,
+#     "EMRStack",
+#     vpc.vpc,
+#     name="EMR with Hive Metastore",
+#     release_label="emr-5.32.0",
+#     rds_secret=rds.instance.secret,
+#     rds_connections=rds.instance.connections,
+# )
 
 # The EKS stack requires bootstrapping
 # Run "cdk bootstrap aws://account/region"
