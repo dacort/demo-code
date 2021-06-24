@@ -2,6 +2,8 @@
 
 Use Bokeh with EMR on EKS to draw daily images of Air Quality data in the continental US.
 
+Demo video: [https://youtu.be/0x4DRKmNPfQ](https://youtu.be/0x4DRKmNPfQ)
+
 ## Overview
 
 - First, we need to login to the relevant ECR and pull the latest EMR image we want.
