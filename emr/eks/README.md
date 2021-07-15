@@ -44,7 +44,7 @@ We can use the [NOAA Integrated Surface Database](https://registry.opendata.aws/
 aws s3 ls s3://noaa-global-hourly-pds/2021/ --no-sign-request
 ```
 
-See the code in [`windy_city.py`](./windy_city.py`) for a full example.
+See the code in [`windy_city.py`](./windy_city.py) for a full example.
 
 <details>
     <summary>Here is exploratory code we can use in a <code>pyspark</code> shell once we've SSH'ed into our EMR cluster.</summary>
