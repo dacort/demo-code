@@ -1,5 +1,7 @@
 # Run EMR jobs with Airflow
 
+Associated video: [https://youtu.be/Z--sNHqkM7c](https://youtu.be/Z--sNHqkM7c)
+
 Airflow is a popular open source workflow management tool. Amazon EMR is a service that allows you to run various big data frameworks like Spark, Hive, and Presto on top of EC2 or EKS. In this demonstration, we'll show you how to schedule a PySpark job using Airflow on:
 
 - EMR on EC2
