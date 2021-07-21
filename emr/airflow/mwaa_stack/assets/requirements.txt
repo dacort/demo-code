@@ -1,0 +1,2 @@
+emr-containers @ https://github.com/dacort/emr-eks-airflow2-plugin/archive/main.zip
+apache-airflow[amazon]==2.0.2
