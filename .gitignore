@@ -3,3 +3,6 @@ venv/
 
 # Notebook checkpoints
 .ipynb_chekpoints/
+
+# Sekrets
+.env
