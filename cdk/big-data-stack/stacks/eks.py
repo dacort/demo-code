@@ -69,6 +69,10 @@ class EKSStack(cdk.Stack):
         # TODO: Make this optional
         # self.enable_airflow()
 
+        # Let's do some monitoring! (but not by default...)
+        # self.enable_prometheus()
+        # self.enable_grafana()
+
         # This is emr-specific, but we have to do it here to prevent circular dependencies
         self.map_iam_to_eks()
 
@@ -156,6 +160,50 @@ class EKSStack(cdk.Stack):
         )
 
         return sa
+
+    def enable_grafana(self, namespace: str = "grafana"):
+        chart = self.cluster.add_helm_chart(
+            "grafana",
+            namespace=namespace,
+            chart="grafana",
+            repository="https://grafana.github.io/helm-charts",
+            version="6.9.1",
+            values={
+                "fullnameOverride": "grafana-dashboard",
+                "adminPassword": "admin",
+                "persistence": {"storageClassName": "gp2", "enabled": "true"},
+                "datasources": {
+                    "datasources.yaml": {
+                        "apiVersion": 1,
+                        "datasources": [
+                            {
+                                "name": "Prometheus",
+                                "type": "prometheus",
+                                "url": "http://prometheus-server.prometheus.svc.cluster.local",
+                                "access": "proxy",
+                                "isDefault": "true",
+                            }
+                        ],
+                    }
+                },
+            },
+        )
+
+    def enable_prometheus(self, namespace: str = "prometheus"):
+        chart = self.cluster.add_helm_chart(
+            "prometheus",
+            namespace=namespace,
+            chart="prometheus",
+            repository="https://prometheus-community.github.io/helm-charts",
+            version="14.0.0",
+            values={
+                "alertmanager": {"persistentVolume": {"storageClass": "gp2"}},
+                "server": {
+                    "fullnameOverride": "prometheus-server",
+                    "persistentVolume": {"storageClass": "gp2"},
+                },
+            },
+        )
 
     def enable_airflow(self, namespace: str = "airflow"):
         # While `add_helm_chart` will create the namespace for us if it doesn't exist,
