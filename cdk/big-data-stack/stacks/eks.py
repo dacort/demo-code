@@ -54,6 +54,14 @@ class EKSStack(cdk.Stack):
             max_size=20,
         )
 
+        # Add a Graviton node group as well for additional capacity
+        # graviton_ng = self.cluster.add_nodegroup_capacity(
+        #     "graviton-node-group",
+        #     instance_types=[ec2.InstanceType(it) for it in ['m6g.2xlarge', 'c6g.2xlarge', 'r6g.2xlarge']],
+        #     min_size=1,
+        #     max_size=20,
+        # )
+
         self.add_admin_role_to_cluster()
         self.add_cluster_admin()
 
