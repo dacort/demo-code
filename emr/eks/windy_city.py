@@ -30,7 +30,7 @@ def topDays(spark, longLeft, latBottom, longRight, latTop):
         .withColumn("ymd", F.split(df.DATE, "T")[0])
 
     # Find top speed for reach day!
-    wind_date_df.groupBy("ymd").agg({'windSpeed':'max'}).orderBy("ymd").show(50)
+    wind_date_df.groupBy("ymd").agg({'windSpeed':'max'}).orderBy("max(windSpeed)", ascending=False).show(50)
 
 if __name__ == "__main__":
     """
