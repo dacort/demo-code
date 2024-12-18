@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: spark-shell-pod
+  namespace: default
+  labels:
+    app: spark-shell
+spec:
+  serviceAccount: spark
+  containers:
+    - name: spark-kubernetes-driver
+      image: apache/spark:3.5.2
+      command: ["/bin/bash"]
+      args: ["-c", "trap : term INT; sleep infinity & wait"]
