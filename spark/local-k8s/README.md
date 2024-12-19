@@ -166,3 +166,79 @@ spark-sql (default)> SELECT * FROM s3tablesbucket.default.demo;
 2       dad     34
 Time taken: 3.455 seconds, Fetched 2 row(s)
 ```
+
+## Reading S3 Tables with other query engines (DuckDB)
+
+The neat(?) thing about S3 Tables is that it's just Iceberg behind the scenes.
+
+So if you use `aws s3tables get-table`, you can find the metadata location:
+
+```bash
+ aws s3tables get-table --table-bucket-arn arn:aws:s3tables:us-west-2:<YOUR_AWS_ACCOUNT_ID>:bucket/dacort-berg --namespace default --name demo
+ ```
+
+ ```json
+ {
+    "name": "demo",
+    "type": "customer",
+    "tableARN": "arn:aws:s3tables:us-west-2:<YOUR_AWS_ACCOUNT_ID>:bucket/dacort-berg/table/e0b502d9-5de1-46a4-8633-412b78401be3",
+    "namespace": [
+        "default"
+    ],
+    "versionToken": "<SOME_ID>",
+    "metadataLocation": "s3://502d9-5de1-46a4-<SOME_OTHER_ID>--table-s3/metadata/00001-e76a727d-8a4d-4883-95c7-dea809f2a4cb.metadata.json",
+    "warehouseLocation": "s3://502d9-5de1-46a4-<SOME_OTHER_ID>--table-s3",
+    "createdAt": "2024-12-18T21:20:39.347151+00:00",
+    "createdBy": "<YOUR_AWS_ACCOUNT_ID>",
+    "modifiedAt": "2024-12-18T21:25:22.327612+00:00",
+    "ownerAccountId": "<YOUR_AWS_ACCOUNT_ID>",
+    "format": "ICEBERG"
+}
+```
+
+If you take the `metadataLocation` from the response and use that in DuckDB (with the `iceberg`, `httpfs` extensions installed and an [S3 secret created](https://duckdb.org/docs/configuration/secrets_manager.html#temporary-secrets))...it seems to work!
+
+_using duckdb v1.1.3 19864453f7_
+
+```sql
+-- Install/load Iceberg and https extensions
+-- Set up S3 access to my specific region
+INSTALL iceberg;
+LOAD iceberg;
+INSTALL https;
+LOAD https;
+CREATE SECRET secret1 (
+    TYPE S3,
+    PROVIDER CREDENTIAL_CHAIN,
+    ENDPOINT 's3.us-west-2.amazonaws.com'
+);
+
+-- Query using the metadat file from above!
+SELECT count(*)
+FROM iceberg_scan('s3://502d9-5de1-46a4-<SOME_OTHER_ID>--table-s3/metadata/00001-e76a727d-8a4d-4883-95c7-dea809f2a4cb.metadata.json');
+```
+
+```
+┌──────────────┐
+│ count_star() │
+│    int64     │
+├──────────────┤
+│            2 │
+└──────────────┘
+```
+
+```sql
+SELECT * FROM iceberg_scan('s3://502d9-5de1-46a4-<SOME_OTHER_ID>--table-s3/metadata/00001-e76a727d-8a4d-4883-95c7-dea809f2a4cb.metadata.json');
+```
+
+```
+┌───────┬─────────┬───────┐
+│  id   │  name   │ value │
+│ int32 │ varchar │ int32 │
+├───────┼─────────┼───────┤
+│     1 │ damon   │    33 │
+│     2 │ dad     │    34 │
+└───────┴─────────┴───────┘
+```
+
+🤯
