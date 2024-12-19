@@ -136,13 +136,16 @@ Then start up Spark SQL
 _note that we assume you already have your AWS CLI setup and can export credentials_
 
 ```bash
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export TABLE_BUCKET_NAME=dacort-berg
+
 kubectl exec -it spark-shell-pod -- /bin/bash -c "export AWS_REGION=us-west-2;$(aws configure export-credentials --format env | tr '\n' ';') \
     /opt/spark/bin/spark-sql \
     --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.6.1,software.amazon.awssdk:s3tables:2.29.26,software.amazon.awssdk:s3:2.29.26,software.amazon.awssdk:sts:2.29.26,software.amazon.awssdk:kms:2.29.26,software.amazon.awssdk:glue:2.29.26,software.amazon.awssdk:dynamodb:2.29.26,software.amazon.s3tables:s3-tables-catalog-for-iceberg-runtime:0.1.3 \
     --conf spark.jars.ivy=/opt/spark/work-dir/.ivy2 \
     --conf spark.sql.catalog.s3tablesbucket=org.apache.iceberg.spark.SparkCatalog \
     --conf spark.sql.catalog.s3tablesbucket.catalog-impl=software.amazon.s3tables.iceberg.S3TablesCatalog \
-    --conf spark.sql.catalog.s3tablesbucket.warehouse=arn:aws:s3tables:us-west-2:<YOUR_AWS_ACCOUNT_ID>:bucket/dacort-berg \
+    --conf spark.sql.catalog.s3tablesbucket.warehouse=arn:aws:s3tables:us-west-2:${AWS_ACCOUNT_ID}:bucket/${TABLE_BUCKET_NAME} \
     --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
 ```
 
@@ -174,7 +177,7 @@ The neat(?) thing about S3 Tables is that it's just Iceberg behind the scenes.
 So if you use `aws s3tables get-table`, you can find the metadata location:
 
 ```bash
- aws s3tables get-table --table-bucket-arn arn:aws:s3tables:us-west-2:<YOUR_AWS_ACCOUNT_ID>:bucket/dacort-berg --namespace default --name demo
+ aws s3tables get-table --table-bucket-arn arn:aws:s3tables:us-west-2:${AWS_ACCOUNT_ID}:bucket/${TABLE_BUCKET_NAME} --namespace default --name demo
  ```
 
  ```json
@@ -242,3 +245,7 @@ SELECT * FROM iceberg_scan('s3://502d9-5de1-46a4-<SOME_OTHER_ID>--table-s3/metad
 ```
 
 🤯
+
+- What happens if I insert more data?
+
+The `metadataLocation` gets updated and we can, of course, query each different version of the table. 🎉
